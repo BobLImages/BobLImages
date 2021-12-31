@@ -30,7 +30,8 @@ class Ball():
         else:
             pygame.draw.circle(display, (0, 0, 255), convert_coordinates(self.body.position), 10)
     def change_to_blue(self, arbiter, space, data):
-        self.shape.collision_type = 2
+        self.shape.collision_type = 2 
+        #for changing the color, the pygame.Body() object has a setter method. You might be able to say self.shape.color("blue") to change the ball color without making this method.
 
 class Platform():
     def __init__(self,y, color):
@@ -78,7 +79,7 @@ def game():
     
     handlers = [space.add_collision_handler(2, i+3) for i in range(100)]
     for i, handler in enumerate(handlers):
-        handler.separate = balls[i].change_to_blue
+        handler.separate = balls[i].change_to_blue #This line can't call the setter method that starts on line 32 because it's not specifying the args and kwargs. It isn't calling the actual function.
 
     platform_3= Platform(1,(0,255,0))
     platform_4 = Platform(599,(0,255,0))
@@ -97,9 +98,9 @@ def game():
             if event.type == pygame.MOUSEBUTTONDOWN:
                 balls.append(Ball(450,450,1))
                 handlers.append(space.add_collision_handler(2, i+3))
-                handlers[-1].begin =balls[-1].change_to_blue
+                handlers[-1].begin =balls[-1].change_to_blue #Same thing as line 82.
                 for i, handler in enumerate(handlers):
-                    handler.separate = balls[-i].change_to_blue
+                    handler.separate = balls[-i].change_to_blue #Same thing as lines 82 and 101.
 
         display.fill((255, 255, 255))
         [ball.draw() for ball in balls]
