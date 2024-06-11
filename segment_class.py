@@ -14,45 +14,45 @@ from skimage.morphology import rectangle
 import skimage.filters as filters
 from skimage import img_as_ubyte
 from image_functions import *
-# from ar import *
 from skimage import io,img_as_float,transform
 from skimage.restoration import denoise_nl_means,estimate_sigma
 from skimage.util import img_as_ubyte
 #from zone_class import *
 import shutil
-from scipy.ndimage.filters import convolve
+from scipy.ndimage import convolve
 #import imquality.brisque as brisque
 import sqlite3
 from timeit import default_timer as timer
+import exifread
+
 
 
 
 def dehaze(img,img_gs):
 
-	total = 0
-	mean =np.average(img_gs)
-	Channels = cv2.split(img)
+    total = 0
+    mean =np.average(img_gs)
+    Channels = cv2.split(img)
 
-	# Estimate Airlight
-	windowSze = 3
-	AirlightMethod = 'fast'
-	A = Airlight(img, AirlightMethod, windowSze)
+    # Estimate Airlight
+    windowSze = 3
+    AirlightMethod = 'fast'
+    A = Airlight(img, AirlightMethod, windowSze)
 
-	# Calculate Boundary Constraints
-	windowSze = 45
-	C0 = 25       # Default value = 20 (as recommended in the paper)
-	C1 = 260        # Default value = 300 (as recommended in the paper)
-	Transmission = BoundCon(img, A, C0, C1, windowSze)                  #   Computing the Transmission using equation (7) in the paper
+    # Calculate Boundary Constraints
+    windowSze = 45
+    C0 = 25       # Default value = 20 (as recommended in the paper)
+    C1 = 260        # Default value = 300 (as recommended in the paper)
+    Transmission = BoundCon(img, A, C0, C1, windowSze)                  #   Computing the Transmission using equation (7) in the paper
 
-	# Refine estimate of transmission
-	regularize_lambda = 1     # Default value = 1 (as recommended in the paper) --> Regularization parameter, the more this  value,
-	# the closer to the original patch wise transmission
-	sigma = 0.5
-	Transmission = CalTransmission(img, Transmission, regularize_lambda, sigma)     # Using contextual information
+    # Refine estimate of transmission
+    regularize_lambda = 1     # Default value = 1 (as recommended in the paper) --> Regularization parameter, the more this  value,
+    # the closer to the original patch wise transmission
+    sigma = 0.5
+    Transmission = CalTransmission(img, Transmission, regularize_lambda, sigma)     # Using contextual information
 
-	# Perform DeHazing
-	return removeHaze(img, Transmission, A, 0.85)
-
+    # Perform DeHazing
+    return removeHaze(img, Transmission, A, 0.85)
 
 def Airlight(HazeImg, AirlightMethod, windowSize):
     if(AirlightMethod.lower() == 'fast'):
@@ -88,8 +88,6 @@ def BoundCon(HazeImg, A, C0, C1, windowSze):
     kernel = np.ones((windowSze, windowSze), np.float)
     transmission = cv2.morphologyEx(transmission, cv2.MORPH_CLOSE, kernel=kernel)
     return(transmission)
-
-
 
 def CalTransmission(HazeImg, Transmission, regularize_lambda, sigma):
     rows, cols = Transmission.shape
@@ -182,9 +180,6 @@ def circularConvFilt(Img, Filter):
     Result = FilteredImg[filterHalsSize:rows+filterHalsSize, filterHalsSize:cols+filterHalsSize]
 
     return(Result)
-
-
-
 
 def psf2otf(psf, shape):
     """
@@ -285,8 +280,6 @@ def zero_pad(image, shape, position='corner'):
 
     return pad_img
 
-
-
 def removeHaze(HazeImg, Transmission, A, delta):
     '''
     :param HazeImg: Hazy input image
@@ -314,26 +307,13 @@ def removeHaze(HazeImg, Transmission, A, delta):
         HazeCorrectedImage = temp
     return(HazeCorrectedImage)
 
-
-def create_grids(display_width,display_height,rows,columns):
-
-	c_y = [(x*display_height/columns) for x in range(columns)]
-	c_x = [(x*display_width/rows) for x in range(rows)]
-	NW = [(int(y),int(x)) for x in c_x for y in c_y]
-	zone_width = int(display_width/len(c_x))
-	zone_height = int(display_height/len(c_y))
-	return NW
-
-
-
-
-# def set_brightness_up(self): 	
-
-   
-#     new_image = cv2.convertScaleAbs(self.image_sharp, alpha=1.05, beta=0)
-#     return new_image
-
-
+def create_grids(display_width, display_height, rows, columns):
+    c_y = [(x * display_height / columns) for x in range(columns)]
+    c_x = [(x * display_width / rows) for x in range(rows)]
+    NW = [(int(y), int(x)) for x in c_x for y in c_y]
+    zone_width = int(display_width / len(c_x))
+    zone_height = int(display_height / len(c_y))
+    return NW,zone_width,zone_height
 
 
 def nothing(h):
@@ -384,9 +364,6 @@ class Thumbnail:
 
         return img
 
-
-
-
 class Hsv_Filter:
 
     def __init__(self, hMin=None, sMin=None, vMin=None, hMax=None, sMax=None, vMax=None, 
@@ -404,157 +381,176 @@ class Hsv_Filter:
 
 
 
+
+
+
 class File_Name:
+    def __init__(self, f_id,full_path):
+
+        self.f_id = f_id
+        self.f_root = full_path[0]
+        self.full_path = full_path
+        # Using os.path.dirname to get the directory part of the path
+        directory = os.path.dirname(full_path)
+        # Using os.path.basename to get the base part of the path (file or last directory)
+        self.base_part = os.path.basename(directory)
+
+
+        head, self.file_name = os.path.split(self.full_path)
+        self.extension = (os.path.splitext(self.full_path)[1])
+
+class Record_Navigator:
+    def __init__(self,t_recs):
+
+        self.f_rec = 0
+        self.c_rec = self.f_rec
+        self.t_recs = t_recs
+        self.prev_c_rec = None
+        self.first = True
+        self.last = False
+        self.initialize = True
+
+
+def timing_decorator(func):
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        print(f"{func.__name__} took {end_time - start_time} seconds to execute.")
+        return result
+    return wrapper
+
+
+
+class FileName:
     def __init__(self, f_id,r):
 
         self.f_id = f_id
         self.f_root = r[0]
-        self.f_parent_dir = r[1]
-        self.f_name = r[2]
-        self.full_path = r[0] + '/' + r[2]
+        self.full_path = r
+        head, self.file_name = os.path.split(r)
+        self.extension = (os.path.splitext(r)[1])
+
+class CameraSettings:
+    def __init__(self, full_path):
+
+            self.exposure = 0
+            self.fstop = 0
+            self.iso = 0
+            self.focal_length = 0
+            self.bodyserialnumber = []
+            self.datetimeoriginal = []
+            self.get_exif_data(full_path)
+    
+    def get_exif_data(self, full_path):
+        im = open(full_path,'rb')
+        tags = exifread.process_file(im)
+        for tag in tags.keys():
+            if tag in "EXIF ExposureTime":
+                result = str(tags[tag])
+                if '/' in result:
+                    new_result, x = result.split('/')
+                    self.exposure = int(new_result)/int(x)
+                else:
+                    self.exposure = int(result)    
+
+            if tag in "EXIF FNumber":
+                result = str(tags[tag])
+                if '/' in result:
+                    new_result, x = result.split('/')
+                    self.fstop = int(new_result)/int(x)
+                else:
+                    self.fstop = int(result)    
+
+            if tag in "EXIF ISOSpeedRatings":
+                result = str(tags[tag])
+                self.iso = int(result)
+
+            if tag in 'EXIF DateTimeOriginal':
+                result = str(tags[tag])
+                self.datetimeoriginal = result
+                #print(self.datetimeoriginal)
+
+            if tag in "EXIF BodySerialNumber":
+                result = str(tags[tag])
+                self.bodyserialnumber = result
+                #print(self.bodyserialnumber)
+
+            if tag in "EXIF FocalLength":
+                result = str(tags[tag])
+                self.focal_length = result
+                #print(self.focal_length)
 
 
 
-class Color_Image:
-    def __init__(self,image_id,fname,r_src,p):
-
-        self.image_id = image_id
-
-        self.fname = fname
-        self.orientation = p
-        self.image = r_src
-        self.brightness = 0.
-        self.contrast = 0.
-        self.image_sharp = np.copy(r_src)
-        self.haze_factor = 0 #self.brightness/self.contrast 
-        self.hough_info = (0,0) #get_hough_lines(self)
-        self.hough_circles =  0 #get_hough_circles(self.image_gs)
-        self.harris_corners = 0 
-        self.contour_info =  (0,0) #get_contours(self)
-        self.laplacian = 0 #get_laplacian(self)
-        self.variance = 0 #get_variance(self)
-        # self.brisque =  get_brisque(self)
-        self.b_w =  (0,0,0) # get_b_w(self)
-        self.shv = 0 #get_shv(self)
-
- 
-        start = timer()
-        self.image_gs = cv2.cvtColor(self.image.astype(np.uint8), cv2.COLOR_BGR2GRAY)
-        end = timer()
-        print(end - start, 'Gray Scaling Time') # Time in seconds, e.g. 5.38091952400282
-
-        start = timer()
-        self.image_dnz = cv2.fastNlMeansDenoisingColored(self.image.astype(np.uint8),None,2,2,7,21)               
-        end = timer()
-        print(end - start, 'De-noising Time') # Time in seconds, e.g. 5.38091952400282
- 
-        # start = timer()
-        self.image_dhz = np.copy(self.image_dnz) # dehaze(self.image_dnz,self.image_gs)
-        # end = timer()
-        # print(end - start, 'De-hazing Time') # Time in seconds, e.g. 5.38091952400282
-
-        start = timer()
-        self.sharpen()
-        end = timer()
-        print(end - start, 'Sharpening Time') # Time in seconds, e.g. 5.38091952400282
 
 
-        start = timer()
-        self.get_brightness()
-        end = timer()
-        #get_brightness(self.image_sharp)
-        print(end - start, 'Getting Brightness') # Time in seconds, e.g. 5.38091952400282
 
-        start = timer()
-        self.get_contrast()
-        end = timer()
-        print(end - start, 'Getting Contrast') # Time in seconds, e.g. 5.38091952400282
+class ImageStatistics:
+    def __init__(self, image_sharp,image_gs):
 
-        start = timer()
+        self.get_brightness(image_sharp)
+
+        self.get_contrast(image_gs)
+
         self.haze_factor = self.brightness/self.contrast
-        end = timer()
-        print(end - start, 'Determining Haze Factor') # Time in seconds, e.g. 5.38091952400282
 
-        # image.hough_circles = get_hough_circles(image.image_gs)
-        # print('Hc')
+        self.get_hough_lines(image_gs)
 
-        # start = timer()
-        # self.get_hough_lines()
-        # end = timer()
-        # print(end - start, 'Hough Lines') # Time in seconds, e.g. 5.38091952400282
+        # self.get_hough_circles(image_gs)    
 
+        self.get_harris(image_gs)
+        
+        self.get_contours(image_gs)
 
-        start = timer()
-        self.get_laplacian()
-        end = timer()
-        print(end - start, 'Laplacian') # Time in seconds, e.g. 5.38091952400282
+        self.get_laplacian(image_gs)
 
+        self.get_variance(image_gs)
 
-        start = timer()
-        self.get_variance()
-        end = timer()
-        print(end - start, 'Determining Variance') # Time in seconds, e.g. 5.38091952400282
+        self.get_b_w(image_gs)
 
+        self.get_shv(image_gs)
 
+        self.get_faces(image_gs)
 
-        start = timer()
-        self.get_b_w()
-        end = timer()
-        print(end - start, 'Segment B/W') # Time in seconds, e.g. 5.38091952400282
+        self.get_eyes(image_gs)
 
-        start = timer()
-        self.get_shv()
-        end = timer()
-        print(end - start, 'SHV') # Time in seconds, e.g. 5.38091952400282
+        self.get_bodies(image_gs)
 
-
-        start = timer()
-        self.get_harris()
-        end = timer()
-        print(end - start, 'Harris Corners') # Time in seconds, e.g. 5.38091952400282
-
-
-        start = timer()
-        self.get_contours()
-        end = timer()
-        print(end - start, 'Contours') # Time in seconds, e.g. 5.38091952400282
-
-		# self.contour_ratio = []
-		
-        self.puter_says = True
-        self.status  = 'Good'
-
-
-    def sharpen(self):
-
-        kernel = np.array([[0, -1, 0],
-                           [-1, 5,-1],
-                           [0, -1, 0]])
-        self.sharpen = cv2.filter2D(src= self.image_dhz, ddepth=-1, kernel=kernel)
-
-
-    def get_hough_lines(self):
+    def get_hough_lines(self,image_gs):
 
         line_length = 800
-        edges = cv2.Canny(self.image_gs, 125, 350, apertureSize=3)
-        cv2.imshow('edges', edges)
+        edges = cv2.Canny(image_gs, 125, 350, apertureSize=3)
         success = False
         while not success:
             lines = cv2.HoughLines(edges, 1, np.pi / 180, line_length)
             try:
                 if len(lines) > 0:
                     self.hough_info = [len(lines),line_length]
+                    #print(self.hough_info)
+                    success = True
             except:
                 line_length = line_length -100
                 if line_length < 20:
                     self.hough_info = [0,20]
+                    success = True
+
+    def get_hough_circles(self,image_gs):
+
+    # detect circles in the image
+        circles = cv2.HoughCircles(image_gs, cv2.HOUGH_GRADIENT, 1.2, 100)
+        # ensure at least some circles were found
+
+        if circles is not None:
+            self.hough_circles = len(circles)
+        else:
+            self.hough_circles = 0    
 
 
-
-    def get_harris(self):
+    def get_harris(self, image_gs):
 
     # find Harris corners
-        gray = np.float32(self.image_gs)
+        gray = np.float32(image_gs)
         dst = cv2.cornerHarris(gray,2,3,0.04)
         dst = cv2.dilate(dst,None)
         ret, dst = cv2.threshold(dst,0.01*dst.max(),255,0)
@@ -567,23 +563,9 @@ class Color_Image:
         self.harris_corners = len(corners)
 
 
-    def get_hough_circles(self):
+    def get_contours(self, image_gs):
 
-    # detect circles in the image
-        circles = cv2.HoughCircles(self.image_gs, cv2.HOUGH_GRADIENT, 1.2, 100)
-        # ensure at least some circles were found
-
-        if circles is not None:
-            hough_circles = len(circles)
-        else:
-            hough_circles = 0    
-
-
-
-    def get_contours(self):
-        # print('Getting Contours')
-
-        edged = cv2.Canny(self.image_gs, 50, 150, 3)
+        edged = cv2.Canny(image_gs, 50, 150, 3)
         contours, hierarchy = cv2.findContours(edged, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
         try:
             self.contour_info = (len(contours),0)
@@ -591,19 +573,15 @@ class Color_Image:
             self.contour_info =  (0,0)
 
 
-
-    def get_laplacian(self):
+    def get_laplacian(self, image_gs):
         # compute the Laplacian of the image and then return the focus
         # measure, which is simply the variance of the Laplacian
-        self.laplacian = cv2.Laplacian(self.image_gs, cv2.CV_64F,5).var()
+        self.laplacian = cv2.Laplacian(image_gs, cv2.CV_64F,5).var()
 
-
-
-    def get_variance(self):
+    def get_variance(self, image_gs):
 
         try:
-            im_cropped_2 = self.image_gs
-            # im_cropped_2  = cv2.cvtColor(im_cropped_2.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            im_cropped_2 = image_gs
         except:
             im_cropped_2 = self.segment
 
@@ -613,8 +591,8 @@ class Color_Image:
         # compute local mean in 5x5 rectangular region of each image
         # note: python will give warning about slower performance when processing 16-bit images
         region = rectangle(5,5)
-        mean_img = filters.rank.mean(im_cropped_2, selem=region)
-        mean_img_sq = filters.rank.mean(img_sq, selem=region)
+        mean_img = filters.rank.mean(im_cropped_2, footprint=region)
+        mean_img_sq = filters.rank.mean(img_sq, footprint=region)
 
         # compute square of local mean of img
         sq_mean_img = cv2.multiply(mean_img, mean_img)
@@ -628,21 +606,18 @@ class Color_Image:
         self.variance = v2
 
 
-    def get_b_w(self):
-
-        # counting the number of pixels
-        black_pix = np.sum(self.image_gs < 75)
-        # mid_pix = np.sum(74 < self.image_gs < 191)
-        white_pix = np.sum(self.image_gs > 190 )
-        # print(black_pix,0,white_pix)
-        self.b_w = (black_pix,0,white_pix)  
+    def get_b_w(self, image_gs):
+    # Count pixels based on value ranges
+        black_pix = np.sum(image_gs < 20)
+        mid_pix = np.sum((image_gs > 19) & (image_gs < 220))
+        white_pix = np.sum(image_gs > 219)
+        self.b_w = (black_pix,mid_pix,white_pix)  
 
 
+    def get_shv(self, image_gs):
 
-    def get_shv(self):
-
-        width, height = self.image_gs.shape
-        pix = self.image_gs
+        width, height = image_gs.shape
+        pix = image_gs
 
         vs = []
         for y in range(height):
@@ -652,78 +627,115 @@ class Color_Image:
         vs.append(variance)
         self.shv = sum(vs)/height
 
+    def get_faces(self, image_gs):
 
-    def get_brightness(self):
+    # Path to the Haar cascade XML file
+        cascade_path = "C:/Program Files/Sublime Text/haarcascade_frontalface_default.xml"
 
-        if len(self.image_sharp.shape) == 3:
-            hsv = cv2.cvtColor(self.image_dhz, cv2.COLOR_BGR2HSV)
+        # Load the Haar cascade classifier
+        face_cascade = cv2.CascadeClassifier(cascade_path)
+        
+        # Detect faces in the image
+        faces = face_cascade.detectMultiScale(image_gs, scaleFactor=1.1, minNeighbors=10, minSize=(50,50))
+        self.faces = len(faces)   
+     
+    def get_eyes(self, image_gs):
+
+        # Path to the Haar cascade XML file
+        cascade_path = "C:/Program Files/Sublime Text/haarcascade_mcs_eyepair_big.xml"
+
+        # Load the Haar cascade classifier
+        eye_cascade = cv2.CascadeClassifier(cascade_path)
+        
+        # Detect eyes in the image
+        eyes = eye_cascade.detectMultiScale(image_gs, scaleFactor=1.1, minNeighbors=10, minSize=(50,50))
+        self.eyes = len(eyes)   
+
+    def get_bodies(self, image_gs):
+
+        # Path to the Haar cascade XML file
+        cascade_path = "C:/Program Files/Sublime Text/haarcascade_fullbody.xml"
+
+        # Load the Haar cascade classifier
+        body_cascade = cv2.CascadeClassifier(cascade_path)
+
+        # Detect bodies in the image
+        bodies = body_cascade.detectMultiScale(image_gs, scaleFactor=1.1, minNeighbors=10, minSize=(50,50))
+        self.bodies = len(bodies)   
+
+    def get_brightness(self, image_sharp):
+
+        if len(image_sharp.shape) == 3:
+            hsv = cv2.cvtColor(image_sharp, cv2.COLOR_BGR2HSV)
+            # print(f'Brightness: {hsv[...,2].mean()}')
             self.brightness = hsv[...,2].mean()
+            print(self.brightness)
 
-    def get_contrast(self):
-        # print(img.std(),'???')
-        self.contrast = self.image_gs.std()
-
-
-
-
-    def put_text(self):
-
-        basename = os.path.basename(self.fname)
-
-        image_labels = []
-        image_labels.append("{label}".format(label = basename))
-        image_labels.append("{label}: {B}".format(label = "Brightness",B = self.brightness))
-        image_labels.append("{label}: {B}".format(label = "Contrast",B = self.contrast))
-        image_labels.append("{label}: {B}".format(label = "Haze",B = self.haze_factor))
-
-        image_labels.append("{label}: {B}".format(label = 'Variance', B = self.variance))
-        image_labels.append("{label}: {B}".format(label =  'Laplacian',B = self.laplacian))
-        image_labels.append("{label}: {B}".format(label = "SHV",B = self.shv))
-        image_labels.append("{label}: {B}".format(label = "Contours",B = self.contour_info[0]))
-        # image_labels.append("{label}: {B}".format(label = "Contour U/M/L",B = self.contour_ratio))
-        image_labels.append("{label}: {B}".format(label = "Hough Lines",B = self.hough_info))
-        image_labels.append("{label}: {B}".format(label = "Circles",B = self.hough_circles))
-        image_labels.append("{label}: {B}".format(label = "Harris Corners",B = self.harris_corners))
-        image_labels.append("{label}: {B}".format(label = "Status",B = self.status))
-        	
-        n = len(image_labels) * 30
-        for label in image_labels:
-        	cv2.putText(self.image_sharp, label, (20, int(self.image_sharp.shape[0] - n)), cv2.FONT_HERSHEY_PLAIN, 1.25, (255,255,255), 2)
-        	cv2.putText(self.image_gs, label, (20, int(self.image_sharp.shape[0] - n)), cv2.FONT_HERSHEY_PLAIN, 1.25, (255,255,255), 2)
-        	cv2.putText(self.image, label, (20, int(self.image_sharp.shape[0] - n)), cv2.FONT_HERSHEY_PLAIN, 1.25, (255,255,255), 2)
-        	n = n -20
-        	
+    def get_contrast(self, image_gs):
+        # print(f'Contrast: {self.image_gs.std()}')
+        self.contrast = image_gs.std()
 
 
-    def get_contour_ratio(self,segments):
+ 
 
-        cr = []
-        for segment in segments:
-        	if segment.image_id == self.image_id:
-        		self.contour_ratio.append(segment.contour_info[0])
+
+class ColorImage:
+
+
+    def __init__(self, r_src, image_id=None, fname=None,  scale_factor = 1, original_height = 0, original_width = 0):
+
+            # print(f'ID = {image_id}\nFile Name = {fname}')            
+            # cv2.imshow("Display Image", r_src)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
+
+            self.image_id = image_id
+            self.fname = FileName(image_id,fname)
+            self.get_classification()
+            self.image = r_src
+            self.image_new = r_src
+            self.original_image_height = original_height
+            self.original_image_width = original_width
+            if original_height > original_width:
+                self.orientation = 'Portrait'
+            else:
+                self.orientation = 'Landscape'
+
+            self.scale_factor = (scale_factor, 1/scale_factor)
+            self.image_gs = cv2.cvtColor(self.image.astype(np.uint8), cv2.COLOR_BGR2GRAY)
+            self.image_dnz = cv2.fastNlMeansDenoisingColored(self.image.astype(np.uint8),None,2,2,7,21)               
+            self.sharpen()
+            self.RODS_image = self.image_sharp
+
+            self.image_stats = ImageStatistics(self.image_sharp, self.image_gs)
+            self.camera_settings = CameraSettings(self.fname.full_path)
 
 
 
-    def save_out(self,root,save,counter):
+            # print(f'OIH {self.original_image_height} OIW {self.original_image_width} SF {self.scale_factor}')
+            #obj = Color_Image()
+            # methods = [method for method in dir(Color_Image) if callable(getattr(Color_Image, method)) and not method.startswith("__")]
+            #print(methods)  # ['method1', 'method2']
 
-        # print(root)
-        # ccc = "{label}: {B} {C} {L} {V} {contours} {CL} {Lines} {Circles} {Status}".format(label = os.path.basename(self.fname), B = self.brightness, C = self.contrast,
-        ccc = "{counter} {label}: {BRIGHTNESS} {CONTRAST} {HAZE} {CONTOURS} {HOUGH} {HOUGH_C} {HARRIS} {GRADE}".format(counter = counter, label = os.path.basename(self.fname), 
-            BRIGHTNESS = self.brightness, CONTRAST = self.contrast, HAZE = self.haze_factor, CONTOURS = self.contour_info[0],
-             HOUGH = (self.hough_info[0], self.hough_info[1]), HOUGH_C = self.hough_circles, HARRIS = self.harris_corners, GRADE = self.status)
-        print (ccc)
-        if save:
-            if self.status == 'Good':
-            	cv2.imwrite(root +  '/Good/' + os.path.basename(self.fname), self.image_sharp)
-            if self.status == 'Haze':
-            	cv2.imwrite(root +  '/Haze/' + os.path.basename(self.fname), self.image_sharp)
-            if self.status == 'Bright':
-            	cv2.imwrite(root +  '/Bright/' + os.path.basename(self.fname), self.image_sharp)
-            if self.status  == 'Dark':
-            	cv2.imwrite(root +  '/Dark/' + os.path.basename(self.fname), self.image_sharp)
-            if self.status == 'Bad':
-            	cv2.imwrite(root +  '/Bad/' + os.path.basename(self.fname), self.image_sharp)
-    
+            # cv2.imshow("RODS Image", self.image_sharp)
+            # cv2.waitKey(0)
+            # cv2.destroyAllWindows()
+
+
+    def get_classification(self):
+        if os.path.basename(self.fname.full_path)[0] in ("G","B", "A", "D"):
+            self.classification =  os.path.basename(self.fname)[0]
+        else:
+            self.classification =  "U"
+
+    def sharpen(self):
+
+        kernel = np.array([[0, -1, 0],
+                           [-1, 5,-1],
+                           [0, -1, 0]])
+
+        self.image_sharp = cv2.filter2D(src= self.image_dnz, ddepth=-1, kernel = kernel)
+
 
 
     def convertToBinaryData(self):
@@ -737,7 +749,7 @@ class Color_Image:
         is_success, im_buf_arr = cv2.imencode(".jpg", self.image_dnz.astype(np.uint8))
         byte_im_dnz = im_buf_arr.tobytes()
 
-        is_success, im_buf_arr = cv2.imencode(".jpg", self.image_dhz.astype(np.uint8))
+        is_success, im_buf_arr = cv2.imencode(".jpg", self.image_dnz.astype(np.uint8))
         byte_im_dhz = im_buf_arr.tobytes()
 
         is_success, im_buf_arr = cv2.imencode(".jpg", self.image_sharp.astype(np.uint8))
@@ -745,69 +757,3 @@ class Color_Image:
 
         return [byte_im, byte_im_gs, byte_im_dnz, byte_im_dhz, byte_im_sharp]
 
-
-
-    def insertVaribleIntoTable(self,t_name,rootdir):
-
-        binary_images = Color_Image.convertToBinaryData(self)
-        # print(len(binary_images))
-
-        # for j, b_image  in enumerate(binary_images):
-        # 	image = np.asarray(bytearray(b_image), dtype="uint8")
-        # 	g = cv2.imdecode(image,cv2.IMREAD_COLOR)
-        # 	cv2.imshow('reconverted' + str(j),g)
-        # cv2.waitKey(0)
-
-        try:
-            sqliteConnection = sqlite3.connect('D:/photo_info.db')
-            cursor = sqliteConnection.cursor()
-        	# print("Connected to SQLite")
-
-            sqlite_insert_with_param = """INSERT INTO [""" + t_name + """]
-        	                  (image_id,file_path,file_name,orientation,image_original,image_gs,image_dns,image_dhz,image_sharp, brightness,
-                               contrast,haze_factor,hough_lines, hough_length,contours,laplacian, variance, shv, puter_says, status,harris ) 
-        	                  VALUES (?, ?, ?,? , ?, ?, ?,? ,  ?,? , ?, ?, ?, ?, ?,? , ?, ?, ?,?,?);"""
-
-                              #,image_original,image_gs,image.dns, image_dhz, image_sharp, brightness, contrast,haze_factor,hough_lines, hough_length,contours,laplacian, variance, black_pixels, white_pixels, shv, puter_says,status,orie) 
-                              #?, ?,  ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,?,?
-
-            data_tuple = (self.image_id, rootdir, self.fname, self.orientation, binary_images[0], binary_images[1], 
-                binary_images[2], binary_images[3], binary_images[4], self.brightness, self.contrast,self.haze_factor,self.hough_info[0], 
-                self.hough_info[1], self.contour_info[0], self.laplacian, self.variance, self.shv, self.puter_says, self.status, self.harris_corners)
-
-            cursor.execute(sqlite_insert_with_param, data_tuple)
-            sqliteConnection.commit()
-            print("Image " + str(self.image_id) + " " + self.fname + " is being inserted in" + t_name + " table")
-            cursor.close()
-        except sqlite3.Error as error:
-            print("Failed to insert Python variable into sqlite table", error)
-        finally:
-            if sqliteConnection:
-            	sqliteConnection.close()
-            print("The SQLite connection is closed")
-
-
-    def assign_grade(self):
-
-        #(self.laplacian > 125 and self.shv > .5) or
-        if  self.hough_info[1] < 30 or self.contour_info[0] < 75 or (self.hough_info[1] == 300 and self.hough_info[0] > 250) or \
-                self.hough_info == (3,75) or self.brightness < 90 and self.contour_info[0] > 800 or self.contrast < 20 and self.shv * 100 < 5 \
-                or self.hough_info[0] > 100: 
-        	self.status = "Bad"
-        if self.brightness > 140 and self.haze_factor > 15:
-        	self.status = "Haze"
-        if self.brightness > 175:
-        	self.status = "Bright"
-        if self.brightness < 40:
-        	self.status = "Dark"
-
-
-        pass
-
-
-
-class Segment(Color_Image):
-	def __init__(self,image_id,fname,segment,segment_id):
-		super(). __init__(image_id,fname,segment)
-
-		self.segment_id = segment_id
